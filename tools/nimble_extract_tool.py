@@ -45,8 +45,8 @@ class NimbleExtractTool(BaseTool):
         nimble = Nimble(api_key=api_key)
 
         logger.info(f"Nimble extract | url: {url}")
-        result = nimble.extract(url=url, render=True, output_format="markdown")
-        content = result.data.content if result.data else None
+        result = nimble.extract(url=url, render=True, formats=["markdown"])
+        content = result.data.markdown if result.data else None
         logger.info(f"Nimble extract {'succeeded' if content else 'returned empty'} for: {url}")
         return {"url": url, "content": content}
 

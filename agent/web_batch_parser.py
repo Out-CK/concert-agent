@@ -9,7 +9,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 BATCH_SIZE = 3
 
 SYSTEM_PROMPT = """You are a concert data extraction specialist. For each web page provided,
@@ -60,6 +60,7 @@ class EventEntry(BaseModel):
     no_tickets_source_4: Optional[str] = None
     no_tickets_webpage_contents_4: Optional[str] = None
     webpage_contents: Optional[str] = None
+    address: Optional[str] = None
 
 
 class EntryList(BaseModel):

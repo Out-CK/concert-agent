@@ -47,17 +47,17 @@ class NimbleSearchTool(BaseTool):
 
         result = nimble.search(
             query=query,
-            max_results=max_results,
-            search_depth="deep",
-            output_format="markdown",
+            num_results=max_results,
         )
 
         pages = []
         for item in result.results or []:
+            # SDK uses .description for snippet; .content may also be present
+            content = getattr(item, "content", None) or getattr(item, "description", "") or ""
             pages.append({
                 "url": getattr(item, "url", ""),
                 "title": getattr(item, "title", ""),
-                "content": getattr(item, "content", ""),
+                "content": content,
             })
 
         logger.info(f"Nimble search returned {len(pages)} results for: {query!r}")

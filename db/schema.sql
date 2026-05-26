@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS event_entry_database (
     no_tickets_webpage_contents_4 TEXT,
     -- Raw source content used to build this entry
     webpage_contents            TEXT,
+    address                     TEXT,                  -- Full street address of the venue
     created_at                  TIMESTAMPTZ DEFAULT NOW(),
     updated_at                  TIMESTAMPTZ DEFAULT NOW()
 );

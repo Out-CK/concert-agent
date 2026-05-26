@@ -9,7 +9,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """You are an expert at generating search queries to find upcoming NYC concert events.
 Your task is to produce exactly 40 search queries that will surface the widest possible range of

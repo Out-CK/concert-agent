@@ -34,6 +34,22 @@ def insert_web_batch(records: list[dict[str, Any]]) -> None:
 # Event Entry Database
 # ---------------------------------------------------------------------------
 
+def get_existing_venue_addresses() -> dict[str, str]:
+    """Return a mapping of venue → address for all entries that already have an address."""
+    client = get_supabase_client()
+    try:
+        result = (
+            client.table("event_entry_database")
+            .select("venue, address")
+            .not_.is_("address", "null")
+            .execute()
+        )
+        return {r["venue"]: r["address"] for r in result.data if r.get("address")}
+    except Exception as e:
+        logger.warning(f"Could not fetch existing venue addresses: {e}")
+        return {}
+
+
 def get_existing_future_entries() -> list[dict[str, Any]]:
     """Fetch all entries in event_entry_database where date >= today."""
     client = get_supabase_client()
@@ -41,7 +57,7 @@ def get_existing_future_entries() -> list[dict[str, Any]]:
     try:
         result = (
             client.table("event_entry_database")
-            .select("event_entry_id, artist, venue, date")
+            .select("event_entry_id, artist, venue, date, start_time")
             .gte("date", today_str)
             .execute()
         )

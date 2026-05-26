@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -12,11 +13,48 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 MERGE_SYSTEM_PROMPT = """You are comparing two or more concert event entries that refer to the same
 show (same artist, venue, and date). Select the BEST version of event_title and description
 from the candidates. Return a JSON object with keys "event_title" and "description"."""
+
+# City/state suffixes the LLM commonly appends to venue names
+_VENUE_SUFFIX_RE = re.compile(
+    r",?\s*(new york(?: city)?|nyc|brooklyn|queens|bronx|staten island|manhattan)"
+    r"(,?\s*(ny|new york))?\s*$",
+    re.IGNORECASE,
+)
+
+# Normalize "8:30pm" → "08:30am/pm", "8pm" → "08:00pm", etc.
+_TIME_RE = re.compile(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$", re.IGNORECASE)
+
+
+def _normalize_venue(venue: str) -> str:
+    """Strip city/state suffixes and lowercase for comparison."""
+    v = venue.strip()
+    v = _VENUE_SUFFIX_RE.sub("", v).strip().rstrip(",").strip()
+    return v.lower()
+
+
+def _normalize_time(t: Optional[str]) -> Optional[str]:
+    """Normalize time strings to 'HH:MMam/pm' for reliable comparison."""
+    if not t:
+        return None
+    m = _TIME_RE.match(t.strip())
+    if not m:
+        return t.strip().lower()
+    hour, minute, meridiem = m.group(1), m.group(2) or "00", m.group(3).lower()
+    return f"{int(hour):02d}:{minute}{meridiem}"
+
+
+def _normalize_artist(artist: str) -> str:
+    """Lowercase and strip common filler words for fuzzy artist comparison."""
+    a = artist.strip().lower()
+    # Remove parenthetical qualifiers like "(tribute)", "feat. X", "ft. X"
+    a = re.sub(r"\s*[\(\[].*?[\)\]]", "", a)
+    a = re.sub(r"\s+(feat(uring)?|ft)\.?\s+.+$", "", a)
+    return a.strip()
 
 
 class MergeChoice(BaseModel):
@@ -34,23 +72,69 @@ class DuplicateFinder:
     # ------------------------------------------------------------------
 
     def deduplicate_batch(self, entries: list[EventEntry]) -> list[EventEntry]:
-        """Group by (artist, venue, date) and merge duplicates."""
+        """
+        Deduplicate using a union-find approach across three overlapping keys:
+          1. (artist_norm, venue_norm, date)          — same show, different venue formatting
+          2. (venue_norm, date, start_time_norm)       — same slot, different artist name formatting
+          3. (artist_norm, venue_norm, date, time_norm) — strictest match
+        Any two entries sharing ANY key are merged into one.
+        """
         logger.info(f"Intra-batch dedup: starting with {len(entries)} entries")
-        groups: dict[tuple, list[EventEntry]] = defaultdict(list)
-        for entry in entries:
-            key = (entry.artist.strip().lower(), entry.venue.strip().lower(), entry.date.strip())
-            groups[key].append(entry)
+
+        # Union-Find
+        parent = list(range(len(entries)))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(x, y):
+            parent[find(x)] = find(y)
+
+        # Build index for each key type
+        avd_index: dict[tuple, int] = {}   # (artist_norm, venue_norm, date)
+        vdt_index: dict[tuple, int] = {}   # (venue_norm, date, time_norm) — only when time is set
+
+        for i, e in enumerate(entries):
+            v = _normalize_venue(e.venue)
+            a = _normalize_artist(e.artist)
+            d = e.date.strip()
+            t = _normalize_time(e.start_time)
+
+            key_avd = (a, v, d)
+            if key_avd in avd_index:
+                union(i, avd_index[key_avd])
+            else:
+                avd_index[key_avd] = i
+
+            if t:
+                key_vdt = (v, d, t)
+                if key_vdt in vdt_index:
+                    union(i, vdt_index[key_vdt])
+                else:
+                    vdt_index[key_vdt] = i
+
+        # Group by root
+        groups: dict[int, list[int]] = defaultdict(list)
+        for i in range(len(entries)):
+            groups[find(i)].append(i)
 
         deduplicated: list[EventEntry] = []
         removed = 0
-        for key, group in groups.items():
+        for root, members in groups.items():
+            group = [entries[i] for i in members]
             if len(group) == 1:
                 deduplicated.append(group[0])
             else:
                 merged = self._merge_group(group)
                 deduplicated.append(merged)
                 removed += len(group) - 1
-                logger.info(f"Merged {len(group)} duplicates for {key}")
+                logger.info(
+                    f"Merged {len(group)} duplicates: "
+                    + " | ".join(f"[{e.event_entry_id}] {e.artist} @ {e.venue}" for e in group)
+                )
 
         logger.info(
             f"Intra-batch dedup complete: {len(deduplicated)} entries remain, {removed} removed"
@@ -58,7 +142,6 @@ class DuplicateFinder:
         return deduplicated
 
     def _merge_group(self, group: list[EventEntry]) -> EventEntry:
-        # Pick titles/descriptions via LLM
         candidates_text = "\n\n".join(
             f"Candidate {i + 1}:\n  event_title: {e.event_title}\n  description: {e.description}"
             for i, e in enumerate(group)
@@ -77,7 +160,12 @@ class DuplicateFinder:
             best_title = group[0].event_title
             best_desc = group[0].description
 
-        base = group[0]
+        # Prefer the entry with the shortest/cleanest venue name and a set start_time
+        base = min(
+            group,
+            key=lambda e: (e.start_time is None, len(e.venue), len(e.artist)),
+        )
+
         merged_dict: dict[str, Any] = {
             "event_entry_id": self._id_gen.next(),
             "entry_batch_id": base.entry_batch_id,
@@ -93,14 +181,12 @@ class DuplicateFinder:
             "webpage_contents": base.webpage_contents,
         }
 
-        # Merge source slots
         merged_dict.update(self._merge_source_slots(group, "tickets"))
         merged_dict.update(self._merge_source_slots(group, "no_tickets"))
 
         return EventEntry(**merged_dict)
 
     def _merge_source_slots(self, group: list[EventEntry], prefix: str) -> dict[str, Optional[str]]:
-        """Collect all source/content pairs from a duplicate group into numbered slots (max 4)."""
         urls: list[str] = []
         contents: list[str] = []
 
@@ -134,26 +220,42 @@ class DuplicateFinder:
     # ------------------------------------------------------------------
 
     def cross_reference_db(self, entries: list[EventEntry]) -> list[EventEntry]:
-        """Remove entries that already exist in the Event Entry Database."""
+        """
+        Remove entries that already exist in the DB, using the same three-key
+        strategy as intra-batch dedup so venue/time formatting differences don't
+        cause the same show to be re-inserted.
+        """
         logger.info(f"Cross-DB dedup: checking {len(entries)} entries against DB…")
         existing = get_existing_future_entries()
-        existing_keys: set[tuple] = {
-            (r["artist"].strip().lower(), r["venue"].strip().lower(), r["date"].strip())
-            for r in existing
-        }
-        existing_id_map: dict[tuple, str] = {
-            (r["artist"].strip().lower(), r["venue"].strip().lower(), r["date"].strip()): r["event_entry_id"]
-            for r in existing
-        }
+
+        # Build lookup sets for all three key types from DB rows
+        db_avd: set[tuple] = set()
+        db_vdt: set[tuple] = set()
+
+        for r in existing:
+            v = _normalize_venue(r["venue"])
+            a = _normalize_artist(r["artist"])
+            d = r["date"].strip()
+            t = _normalize_time(r.get("start_time"))
+
+            db_avd.add((a, v, d))
+            if t:
+                db_vdt.add((v, d, t))
 
         net_new: list[EventEntry] = []
         removed = 0
         for entry in entries:
-            key = (entry.artist.strip().lower(), entry.venue.strip().lower(), entry.date.strip())
-            if key in existing_keys:
-                db_id = existing_id_map.get(key, "unknown")
+            v = _normalize_venue(entry.venue)
+            a = _normalize_artist(entry.artist)
+            d = entry.date.strip()
+            t = _normalize_time(entry.start_time)
+
+            is_dupe = (a, v, d) in db_avd or (t and (v, d, t) in db_vdt)
+
+            if is_dupe:
                 logger.info(
-                    f"Cross-DB duplicate: {entry.event_entry_id} matches DB entry {db_id} — skipping"
+                    f"Cross-DB duplicate skipped: [{entry.event_entry_id}] "
+                    f"{entry.artist} @ {entry.venue} on {entry.date} {entry.start_time}"
                 )
                 removed += 1
             else:

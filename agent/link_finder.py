@@ -9,7 +9,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 BATCH_SIZE = 5
 
 SYSTEM_PROMPT = """You are a concert link finder. You will receive raw web page content from a
