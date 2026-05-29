@@ -97,21 +97,44 @@ def _build_address(result: dict) -> str:
     return ", ".join(parts) if parts else result.get("display_name", "")
 
 
+_BOROUGH_RE = re.compile(
+    r"\b(brooklyn|bronx|queens|staten island)\b", re.IGNORECASE
+)
+
+
 def lookup_address(venue: str) -> Optional[str]:
     """
     Return a street address string for a venue name, or None if not found.
-    Tries two strategies: cleaned venue name, then venue + New York City.
+    Tries multiple strategies: borough-aware queries first, then NYC fallback,
+    then bare venue name.
     """
     cleaned = _clean_venue(venue)
-    for query in [f"{cleaned}, New York City, NY", cleaned]:
+
+    # If the original venue name mentions a specific borough, try that first
+    borough_match = _BOROUGH_RE.search(venue)
+    queries: list[str] = []
+    if borough_match:
+        borough = borough_match.group(1).title()
+        queries.append(f"{cleaned}, {borough}, NY")
+    queries.append(f"{cleaned}, New York City, NY")
+    if not borough_match:
+        # Also try Manhattan explicitly for venues that are likely in Manhattan
+        queries.append(f"{cleaned}, Manhattan, NY")
+    queries.append(cleaned)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_queries = [q for q in queries if not (q in seen or seen.add(q))]  # type: ignore[func-returns-value]
+
+    for query in unique_queries:
         try:
             results = _nominatim_search(query)
             if results:
                 address = _build_address(results[0])
-                logger.debug(f"Geocoded '{venue}' → '{address}'")
+                logger.debug(f"Geocoded '{venue}' via '{query}' → '{address}'")
                 return address
         except Exception as e:
-            logger.warning(f"Nominatim lookup failed for '{venue}': {e}")
+            logger.warning(f"Nominatim lookup failed for '{venue}' (query='{query}'): {e}")
     logger.warning(f"No address found for venue: '{venue}'")
     return None
 

@@ -25,6 +25,10 @@ Rules:
 - event_title format: "[Artist] at [Venue]" for single-artist, "[Festival] at [Venue]" for festivals.
 - date format: "MM-DD-YYYY" (e.g., "06-15-2026")
 - start_time / end_time format: "00:00am" or "00:00pm" (e.g., "08:00pm")
+- If the venue's full street address is visible anywhere on the page, populate the `address` field
+  (e.g., "35 W 35th St, New York, NY 10001" or "51 W 30th St, Manhattan, NY 10001").
+  Include the street number, street name, borough/city, state, and zip if available.
+  If no street address is visible, leave `address` empty.
 - If artist, venue, OR date cannot be confidently extracted, SKIP that entry.
 - DO NOT set event_entry_id or entry_batch_id — leave them as empty strings "".
 - Return a JSON object with key "entries" containing an array of EventEntry objects.
