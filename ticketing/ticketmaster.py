@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
 
 from utils.logger import get_logger
 
@@ -50,7 +50,14 @@ class TicketmasterClient:
     def _paginate(self, start: str, end: str) -> Iterator[list[dict]]:
         page = 0
         while True:
-            data = self._fetch_page(page, start, end)
+            try:
+                data = self._fetch_page(page, start, end)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 400 and page > 0:
+                    # Free-tier page cap reached — we already have all accessible results
+                    logger.info(f"Ticketmaster: page cap reached at page {page}, stopping")
+                    break
+                raise
             embedded = data.get("_embedded", {})
             events = embedded.get("events", [])
             yield events
@@ -62,7 +69,8 @@ class TicketmasterClient:
             page += 1
 
     @retry(
-        retry=retry_if_exception_type(httpx.HTTPError),
+        # Only retry on transport/connection errors, not 4xx/5xx client errors
+        retry=retry_if_exception_type(httpx.TransportError),
         stop=stop_after_attempt(3),
         wait=wait_exponential(min=2, max=10),
     )
