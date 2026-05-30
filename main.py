@@ -1,9 +1,10 @@
 """
-CLI entrypoint for the Concert Agent.
+CLI entrypoint for the NYC Event Agent.
 
 Usage:
     python main.py --run-now        # Trigger a Concert Run immediately
     python main.py --schedule       # Start the daily scheduler (blocks until Ctrl+C)
+    python main.py --art-run        # Trigger an Art Gallery Run immediately
     python main.py --tiktok         # Trigger a TikTok Concert Run immediately
     python main.py --ticketing-run  # Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly
 """
@@ -48,6 +49,7 @@ def main() -> None:
     group.add_argument("--schedule", action="store_true", help="Start the daily scheduler")
     group.add_argument("--instagram", action="store_true", help="Trigger an Instagram Run immediately")
     group.add_argument("--instagram-schedule", action="store_true", help="Start the daily scheduler (concert + Instagram)")
+    group.add_argument("--art-run", action="store_true", help="Trigger an Art Gallery Run immediately")
     group.add_argument("--tiktok", action="store_true", help="Trigger a TikTok Concert Run immediately")
     group.add_argument("--ticketing-run", action="store_true", help="Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly")
     args = parser.parse_args()
@@ -75,6 +77,11 @@ def main() -> None:
         logger.info("Mode: --instagram-schedule | Starting daily scheduler (concert + Instagram)")
         from scheduler.job_scheduler import start_scheduler
         start_scheduler(include_instagram=True)
+
+    elif args.art_run:
+        logger.info("Mode: --art-run | Triggering immediate Art Gallery Run")
+        from agent.art_agent import ArtAgent
+        ArtAgent().run()
 
     elif args.tiktok:
         logger.info("Mode: --tiktok | Triggering immediate TikTok Concert Run")

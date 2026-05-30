@@ -31,6 +31,16 @@ def run_ticketing_run() -> None:
         logger.error(f"Scheduled Ticketing Run failed: {e}", exc_info=True)
 
 
+def run_art_run() -> None:
+    """Entry point for the daily Art Gallery Run."""
+    from agent.art_agent import ArtAgent
+    logger.info("Scheduled Art Run triggered")
+    try:
+        ArtAgent().run()
+    except Exception as e:
+        logger.error(f"Scheduled Art Run failed: {e}", exc_info=True)
+
+
 def run_instagram_run() -> None:
     """Entry point for the daily Instagram Run."""
     from agent.instagram_agent import InstagramAgent
@@ -58,10 +68,17 @@ def start_scheduler(include_instagram: bool = False) -> None:
         name="Daily Ticketing Platform Run",
         replace_existing=True,
     )
+    scheduler.add_job(
+        run_art_run,
+        trigger=CronTrigger(hour=9, minute=45, timezone=eastern),
+        id="daily_art_run",
+        name="Daily Art Gallery Run",
+        replace_existing=True,
+    )
     if include_instagram:
         scheduler.add_job(
             run_instagram_run,
-            trigger=CronTrigger(hour=9, minute=30, timezone=eastern),
+            trigger=CronTrigger(hour=10, minute=0, timezone=eastern),
             id="daily_instagram_run",
             name="Daily Instagram Concert Run",
             replace_existing=True,
@@ -69,8 +86,9 @@ def start_scheduler(include_instagram: bool = False) -> None:
     scheduler.start()
     logger.info("Scheduler started — Concert Run fires daily at 09:00 America/New_York")
     logger.info("Ticketing Run fires daily at 09:15 America/New_York")
+    logger.info("Art Run fires daily at 09:45 America/New_York")
     if include_instagram:
-        logger.info("Instagram Run fires daily at 09:30 America/New_York")
+        logger.info("Instagram Run fires daily at 10:00 America/New_York")
     logger.info("Press Ctrl+C to stop")
     try:
         while True:
