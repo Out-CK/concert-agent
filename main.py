@@ -4,6 +4,7 @@ CLI entrypoint for the Concert Agent.
 Usage:
     python main.py --run-now      # Trigger a Concert Run immediately
     python main.py --schedule     # Start the daily scheduler (blocks until Ctrl+C)
+    python main.py --tiktok       # Trigger a TikTok Concert Run immediately
 """
 import argparse
 import os
@@ -44,6 +45,9 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--run-now", action="store_true", help="Trigger a Concert Run immediately")
     group.add_argument("--schedule", action="store_true", help="Start the daily scheduler")
+    group.add_argument("--instagram", action="store_true", help="Trigger an Instagram Run immediately")
+    group.add_argument("--instagram-schedule", action="store_true", help="Start the daily scheduler (concert + Instagram)")
+    group.add_argument("--tiktok", action="store_true", help="Trigger a TikTok Concert Run immediately")
     args = parser.parse_args()
 
     # Initialize Supabase client eagerly to catch config errors before running
@@ -59,6 +63,21 @@ def main() -> None:
         logger.info("Mode: --schedule | Starting daily scheduler")
         from scheduler.job_scheduler import start_scheduler
         start_scheduler()
+
+    elif args.instagram:
+        logger.info("Mode: --instagram | Triggering immediate Instagram Run")
+        from agent.instagram_agent import InstagramAgent
+        InstagramAgent().run()
+
+    elif args.instagram_schedule:
+        logger.info("Mode: --instagram-schedule | Starting daily scheduler (concert + Instagram)")
+        from scheduler.job_scheduler import start_scheduler
+        start_scheduler(include_instagram=True)
+
+    elif args.tiktok:
+        logger.info("Mode: --tiktok | Triggering immediate TikTok Concert Run")
+        from agent.tiktok_agent import TikTokConcertAgent
+        TikTokConcertAgent().run()
 
 
 if __name__ == "__main__":
