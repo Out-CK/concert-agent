@@ -31,6 +31,11 @@ Rules:
   If no street address is visible, leave `address` empty.
 - If artist, venue, OR date cannot be confidently extracted, SKIP that entry.
 - DO NOT set event_entry_id or entry_batch_id — leave them as empty strings "".
+- For the `genre` field, assign exactly ONE genre from this list based on the artist's style:
+  Rock, Indie, Pop, Hip-Hop, Jazz, Classical, Electronic, R&B, Country, Folk, Metal,
+  Alternative, Blues, Latin, Punk, Experimental, Reggae, Gospel, World, Other.
+  Use context clues from the page (artist bio, venue type, tags, event description).
+  If genre cannot be determined, set genre to "Other".
 - Return a JSON object with key "entries" containing an array of EventEntry objects.
 """
 
@@ -63,6 +68,7 @@ class EventEntry(BaseModel):
     no_tickets_webpage_contents_3: Optional[str] = None
     no_tickets_source_4: Optional[str] = None
     no_tickets_webpage_contents_4: Optional[str] = None
+    genre: Optional[str] = None
     webpage_contents: Optional[str] = None
     address: Optional[str] = None
     lat: Optional[float] = None
