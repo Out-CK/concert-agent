@@ -6,11 +6,9 @@ Nimble TikTok tools — wrappers around Nimble's pre-built TikTok agents.
 """
 from __future__ import annotations
 
-import base64
 import os
 from typing import Any, Type
 
-import httpx
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from tenacity import (
@@ -24,27 +22,27 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_NIMBLE_AGENTS_URL = "https://api.webit.live/api/v1/realtime/agents"
-_TIMEOUT = 60.0  # seconds
-
-
-def _auth_header(api_key: str) -> str:
-    token = base64.b64encode(f"{api_key}:".encode()).decode()
-    return f"Basic {token}"
-
 
 def _run_agent(agent_name: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Low-level HTTP call to the Nimble agents endpoint."""
+    """Run a Nimble pre-built agent via the nimble-python SDK."""
+    from nimble_python import Nimble
+
     api_key = os.environ["NIMBLE_API_KEY"]
-    headers = {
-        "Authorization": _auth_header(api_key),
-        "Content-Type": "application/json",
-    }
-    payload = {"agent": agent_name, "params": params}
-    with httpx.Client(timeout=_TIMEOUT) as client:
-        response = client.post(_NIMBLE_AGENTS_URL, json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()
+    nimble = Nimble(api_key=api_key)
+    response = nimble.agent.run(agent=agent_name, params=params, timeout=90)
+
+    # Structured output lives in response.data.parsing
+    parsing = response.data.parsing if response.data else None
+    if parsing is None:
+        return {}
+    # The SDK may return a Pydantic model or a plain dict
+    if hasattr(parsing, "model_dump"):
+        return parsing.model_dump()
+    if hasattr(parsing, "entities"):
+        return parsing.entities or {}
+    if isinstance(parsing, dict):
+        return parsing
+    return {}
 
 
 # ---------------------------------------------------------------------------
