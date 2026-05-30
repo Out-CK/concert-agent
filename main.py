@@ -7,6 +7,7 @@ Usage:
     python main.py --art-run        # Trigger an Art Gallery Run immediately
     python main.py --tiktok         # Trigger a TikTok Concert Run immediately
     python main.py --ticketing-run  # Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly
+    python main.py --enrich-venues  # Find addresses for unmapped venues
 """
 import argparse
 import os
@@ -52,6 +53,7 @@ def main() -> None:
     group.add_argument("--art-run", action="store_true", help="Trigger an Art Gallery Run immediately")
     group.add_argument("--tiktok", action="store_true", help="Trigger a TikTok Concert Run immediately")
     group.add_argument("--ticketing-run", action="store_true", help="Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly")
+    group.add_argument("--enrich-venues", action="store_true", help="Find addresses for unmapped venues")
     args = parser.parse_args()
 
     # Initialize Supabase client eagerly to catch config errors before running
@@ -92,6 +94,11 @@ def main() -> None:
         logger.info("Mode: --ticketing-run | Querying ticketing platforms directly")
         from ticketing.ticketing_agent import TicketingAgent
         TicketingAgent().run()
+
+    elif args.enrich_venues:
+        logger.info("Mode: --enrich-venues | Finding addresses for unmapped venues")
+        from agent.venue_enricher import VenueEnricher
+        VenueEnricher().run()
 
 
 if __name__ == "__main__":
