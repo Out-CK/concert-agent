@@ -102,9 +102,9 @@ _BOROUGH_RE = re.compile(
 )
 
 
-def lookup_address(venue: str) -> Optional[str]:
+def lookup_coords(venue: str) -> Optional[tuple[float, float, str]]:
     """
-    Return a street address string for a venue name, or None if not found.
+    Return (lat, lng, address) for a venue name, or None if not found.
     Tries multiple strategies: borough-aware queries first, then NYC fallback,
     then bare venue name.
     """
@@ -118,7 +118,6 @@ def lookup_address(venue: str) -> Optional[str]:
         queries.append(f"{cleaned}, {borough}, NY")
     queries.append(f"{cleaned}, New York City, NY")
     if not borough_match:
-        # Also try Manhattan explicitly for venues that are likely in Manhattan
         queries.append(f"{cleaned}, Manhattan, NY")
     queries.append(cleaned)
 
@@ -130,35 +129,63 @@ def lookup_address(venue: str) -> Optional[str]:
         try:
             results = _nominatim_search(query)
             if results:
-                address = _build_address(results[0])
-                logger.debug(f"Geocoded '{venue}' via '{query}' → '{address}'")
-                return address
+                r = results[0]
+                lat = float(r["lat"])
+                lng = float(r["lon"])
+                address = _build_address(r)
+                logger.debug(f"Geocoded '{venue}' via '{query}' → ({lat}, {lng}) '{address}'")
+                return lat, lng, address
         except Exception as e:
             logger.warning(f"Nominatim lookup failed for '{venue}' (query='{query}'): {e}")
-    logger.warning(f"No address found for venue: '{venue}'")
+    logger.warning(f"No coords found for venue: '{venue}'")
     return None
 
 
-def enrich_entries_with_addresses(entries: list[dict], existing_cache: dict[str, str] | None = None) -> list[dict]:
+# Keep old name as an alias for any callers that only need the address string
+def lookup_address(venue: str) -> Optional[str]:
+    result = lookup_coords(venue)
+    return result[2] if result else None
+
+
+def enrich_entries_with_coords(
+    entries: list[dict],
+    existing_cache: dict[str, tuple[float, float, str]] | None = None,
+) -> list[dict]:
     """
-    Add an 'address' field to each entry dict by looking up its venue.
-    existing_cache maps venue → known address (avoids re-fetching).
+    Add address, lat, and lng fields to each entry dict by geocoding its venue.
+    existing_cache maps venue → (lat, lng, address) to avoid redundant lookups.
     """
-    cache: dict[str, str] = dict(existing_cache or {})
+    cache: dict[str, tuple[float, float, str] | None] = dict(existing_cache or {})
     unique_venues = {e["venue"] for e in entries if e.get("venue") and e.get("venue") != "<UNKNOWN>"}
     to_fetch = [v for v in unique_venues if v not in cache]
 
-    logger.info(f"Address enrichment: {len(unique_venues)} unique venues, {len(to_fetch)} need lookup")
+    logger.info(f"Geocoding: {len(unique_venues)} unique venues, {len(to_fetch)} need lookup")
 
     for venue in to_fetch:
-        address = lookup_address(venue)
-        cache[venue] = address or ""
+        cache[venue] = lookup_coords(venue)
 
     for entry in entries:
         venue = entry.get("venue", "")
-        if not entry.get("address"):
-            entry["address"] = cache.get(venue) or None
+        result = cache.get(venue)
+        if result:
+            lat, lng, address = result
+            if not entry.get("address"):
+                entry["address"] = address
+            entry["lat"] = lat
+            entry["lng"] = lng
+        else:
+            entry.setdefault("lat", None)
+            entry.setdefault("lng", None)
 
-    fetched = sum(1 for v in to_fetch if cache.get(v))
-    logger.info(f"Address enrichment complete: {fetched}/{len(to_fetch)} resolved")
+    resolved = sum(1 for v in to_fetch if cache.get(v))
+    logger.info(f"Geocoding complete: {resolved}/{len(to_fetch)} resolved")
     return entries
+
+
+# Keep old name as an alias
+def enrich_entries_with_addresses(entries: list[dict], existing_cache: dict[str, str] | None = None) -> list[dict]:
+    coord_cache: dict[str, tuple[float, float, str] | None] = {}
+    if existing_cache:
+        # Convert old address-only cache — we don't have coords for these, leave them to be fetched
+        pass
+    return enrich_entries_with_coords(entries, coord_cache)

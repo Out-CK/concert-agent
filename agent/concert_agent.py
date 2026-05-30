@@ -12,11 +12,11 @@ from agent.link_finder import LinkFinderAgent
 from agent.past_event_archiver import PastEventArchiver
 from agent.search_plan import SearchPlanAgent
 from agent.web_batch_parser import EventEntry, WebBatchParser
-from db.operations import insert_event_entries, insert_web_batch, get_existing_venue_addresses
+from db.operations import insert_event_entries, insert_web_batch, get_existing_venue_coords
 from db.supabase_client import get_supabase_client
 from tools.nimble_extract_tool import NimbleExtractTool
 from tools.nimble_search_tool import NimbleSearchTool
-from utils.geocoder import enrich_entries_with_addresses
+from utils.geocoder import enrich_entries_with_coords
 from utils.id_generator import IDGenerator
 from utils.logger import get_logger
 
@@ -175,14 +175,16 @@ class ConcertAgent:
         # ------------------------------------------------------------------
         # Step 7b — Enrich with Venue Addresses
         # ------------------------------------------------------------------
-        self._step_log("Step 7b: Address Enrichment")
+        self._step_log("Step 7b: Geocoding Enrichment")
         try:
-            known_addresses = get_existing_venue_addresses()
+            known_coords = get_existing_venue_coords()
             entry_dicts = [e.model_dump() for e in entry_batch]
-            entry_dicts = enrich_entries_with_addresses(entry_dicts, known_addresses)
-            # Write addresses back onto EventEntry objects
+            entry_dicts = enrich_entries_with_coords(entry_dicts, known_coords)
+            # Write geocoding results back onto EventEntry objects
             for entry, d in zip(entry_batch, entry_dicts):
                 entry.address = d.get("address")
+                entry.lat = d.get("lat")
+                entry.lng = d.get("lng")
         except Exception as e:
             logger.error(f"Step 7b failed: {e}")
 

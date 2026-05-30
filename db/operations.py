@@ -34,20 +34,30 @@ def insert_web_batch(records: list[dict[str, Any]]) -> None:
 # Event Entry Database
 # ---------------------------------------------------------------------------
 
-def get_existing_venue_addresses() -> dict[str, str]:
-    """Return a mapping of venue → address for all entries that already have an address."""
+def get_existing_venue_coords() -> dict[str, tuple[float, float, str]]:
+    """Return a mapping of venue → (lat, lng, address) for all entries that already have coords."""
     client = get_supabase_client()
     try:
         result = (
             client.table("event_entry_database")
-            .select("venue, address")
-            .not_.is_("address", "null")
+            .select("venue, address, lat, lng")
+            .not_.is_("lat", "null")
             .execute()
         )
-        return {r["venue"]: r["address"] for r in result.data if r.get("address")}
+        cache: dict[str, tuple[float, float, str]] = {}
+        for r in result.data:
+            if r.get("lat") is not None and r.get("lng") is not None and r.get("venue"):
+                cache[r["venue"]] = (float(r["lat"]), float(r["lng"]), r.get("address") or "")
+        return cache
     except Exception as e:
-        logger.warning(f"Could not fetch existing venue addresses: {e}")
+        logger.warning(f"Could not fetch existing venue coords: {e}")
         return {}
+
+
+def get_existing_venue_addresses() -> dict[str, str]:
+    """Return a mapping of venue → address for all entries that already have an address."""
+    coords = get_existing_venue_coords()
+    return {venue: addr for venue, (_, _, addr) in coords.items() if addr}
 
 
 def get_existing_future_entries() -> list[dict[str, Any]]:

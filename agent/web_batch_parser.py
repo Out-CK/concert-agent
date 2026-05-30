@@ -65,6 +65,8 @@ class EventEntry(BaseModel):
     no_tickets_webpage_contents_4: Optional[str] = None
     webpage_contents: Optional[str] = None
     address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class EntryList(BaseModel):
