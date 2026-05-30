@@ -30,17 +30,18 @@ class VenueAddress(BaseModel):
 
 
 class VenueEnricher:
-    def __init__(self) -> None:
+    def __init__(self, event_type: str) -> None:
+        self._event_type = event_type
         self._llm = ChatAnthropic(model=MODEL).with_structured_output(VenueAddress)
         self._search = NimbleSearchTool()
 
     def run(self) -> None:
-        venues = get_unmapped_venues()
+        venues = get_unmapped_venues(self._event_type)
         if not venues:
             logger.info("VenueEnricher: no unmapped venues found")
             return
 
-        logger.info(f"VenueEnricher: {len(venues)} unmapped venue(s) to process")
+        logger.info(f"VenueEnricher [{self._event_type}]: {len(venues)} unmapped venue(s) to process")
         resolved = 0
 
         for venue_name, event_ids in venues.items():
@@ -55,7 +56,7 @@ class VenueEnricher:
             else:
                 logger.info(f"  ✗ '{venue_name}' — could not locate")
 
-        logger.info(f"VenueEnricher complete: {resolved}/{len(venues)} venues resolved")
+        logger.info(f"VenueEnricher [{self._event_type}] complete: {resolved}/{len(venues)} venues resolved")
 
     def _enrich_venue(self, venue: str) -> Optional[tuple[float, float, str]]:
         # 1. Re-try Nominatim directly

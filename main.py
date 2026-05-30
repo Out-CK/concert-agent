@@ -98,7 +98,7 @@ def main() -> None:
     elif args.enrich_venues:
         logger.info("Mode: --enrich-venues | Finding addresses for unmapped venues")
         from agent.venue_enricher import VenueEnricher
-        VenueEnricher().run()
+        VenueEnricher(event_type="concert").run()
 
 
 if __name__ == "__main__":

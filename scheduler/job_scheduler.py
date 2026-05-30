@@ -46,7 +46,7 @@ def run_venue_enricher() -> None:
     from agent.venue_enricher import VenueEnricher
     logger.info("Scheduled Venue Enricher triggered")
     try:
-        VenueEnricher().run()
+        VenueEnricher(event_type="concert").run()
     except Exception as e:
         logger.error(f"Scheduled Venue Enricher failed: {e}", exc_info=True)
 
