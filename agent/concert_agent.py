@@ -216,6 +216,12 @@ class ConcertAgent:
         # ------------------------------------------------------------------
         self._step_log("Step 10: Insert Event Entries")
         try:
+            # Re-generate IDs immediately before insert to avoid conflicts with
+            # concurrent runs that may have inserted entries since Step 7 initialized
+            # the IDGenerator (geocoding + dedup can take a long time).
+            fresh_id_gen = IDGenerator(self._supabase)
+            for entry in entry_batch:
+                entry.event_entry_id = fresh_id_gen.next()
             rows = [e.model_dump() for e in entry_batch]
             stats["entries_inserted"] = insert_event_entries(rows)
         except Exception as e:
