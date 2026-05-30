@@ -13,12 +13,15 @@ from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel
 
 from agent.art_batch_parser import ArtBatchParser, ArtEntry
+from agent.art_instagram_parser import ArtInstagramParser
+from agent.art_tiktok_parser import ArtTikTokParser
 from agent.duplicate_finder import DuplicateFinder
 from agent.link_finder import LinkFinderAgent
 from agent.past_event_archiver import PastEventArchiver
 from db.operations import insert_event_entries, insert_web_batch, get_existing_venue_coords
 from db.supabase_client import get_supabase_client
 from tools.nimble_extract_tool import NimbleExtractTool
+from tools.nimble_instagram_tool import NimbleInstagramProfileTool
 from tools.nimble_search_tool import NimbleSearchTool
 from utils.geocoder import enrich_entries_with_coords
 from utils.id_generator import IDGenerator
@@ -28,6 +31,50 @@ logger = get_logger(__name__)
 
 CONCURRENCY_LIMIT = 5
 MODEL = "claude-sonnet-4-6"
+
+# Curated NYC gallery and museum Instagram accounts
+ART_INSTAGRAM_ACCOUNTS = [
+    # Major museums
+    "themuseumofmodernart",
+    "whitneymuseum",
+    "guggenheim",
+    "metmuseum",
+    "brooklynmuseum",
+    "newmuseum",
+    "thejewishmuseum",
+    "cooperhewitt",
+    "studiomuseum",
+    "madnyc",              # Museum of Arts and Design
+    # Blue-chip galleries
+    "gagosian",
+    "pacegallery",
+    "davidzwirner",
+    "hauserwirth",
+    "perrotin",
+    "luhringaugustine",
+    "gladstonegallery",
+    "matthewmarks",
+    "tanyabonakdargallery",
+    "petzelgallery",
+    "blumandpoe",
+    "skarstedtgallery",
+    "mariangoodman",
+    "spruethmagers",
+    # Mid-tier / downtown galleries
+    "55walker",
+    "pioneerworks",
+    "printedmatternyc",
+    "bridgewater_art",
+    "culturehub_nyc",
+    # Art media / aggregators
+    "artsy",
+    "hyperallergic",
+    "artforum",
+    "friezearts",
+    "artnews",
+    "theartnewspaper",
+    "nyartbeat",
+]
 
 # ---------------------------------------------------------------------------
 # Search Plan
@@ -119,6 +166,7 @@ class ArtAgent:
     def __init__(self):
         self._search_tool = NimbleSearchTool()
         self._extract_tool = NimbleExtractTool()
+        self._instagram_profile_tool = NimbleInstagramProfileTool()
         self._supabase = get_supabase_client()
 
     def run(self) -> None:
@@ -128,6 +176,10 @@ class ArtAgent:
         logger.info(f"=== Art Run START | entry_batch_id={entry_batch_id} ===")
 
         stats = {
+            "instagram_profiles_scraped": 0,
+            "instagram_entries_parsed": 0,
+            "tiktok_videos_collected": 0,
+            "tiktok_entries_parsed": 0,
             "queries_executed": 0,
             "pages_round1": 0,
             "pages_round2": 0,
@@ -137,6 +189,73 @@ class ArtAgent:
             "entries_inserted": 0,
             "entries_archived": 0,
         }
+
+        # Step 0a — Instagram: Scrape gallery/museum profiles
+        self._step_log("Step 0a: Instagram Gallery & Museum Scraping")
+        social_entries: list[ArtEntry] = []
+        id_generator = IDGenerator(self._supabase)
+        try:
+            raw_profiles = asyncio.run(
+                self._scrape_instagram_profiles_concurrent(ART_INSTAGRAM_ACCOUNTS)
+            )
+            post_pages: list[dict] = []
+            for handle, profile_data in raw_profiles:
+                if not profile_data:
+                    continue
+                posts = profile_data.get("posts") or []
+                bio = profile_data.get("biography") or ""
+                profile_url = (
+                    profile_data.get("profile_url")
+                    or f"https://www.instagram.com/{handle}/"
+                )
+                if not posts:
+                    continue
+                stats["instagram_profiles_scraped"] += 1
+                combined_text = f"BIOGRAPHY: {bio}\n\n"
+                for post in posts:
+                    caption = self._extract_post_caption(post)
+                    if caption:
+                        combined_text += f"---\nPOST: {caption}\n"
+                post_pages.append({
+                    "url": profile_url,
+                    "handle": handle,
+                    "content": combined_text[:30000],
+                })
+            logger.info(
+                f"Instagram: scraped {stats['instagram_profiles_scraped']} profiles "
+                f"from {len(ART_INSTAGRAM_ACCOUNTS)} accounts"
+            )
+            if post_pages:
+                ig_entries = ArtInstagramParser().parse(post_pages)
+                stats["instagram_entries_parsed"] = len(ig_entries)
+                for entry in ig_entries:
+                    entry.entry_batch_id = entry_batch_id
+                    entry.event_entry_id = id_generator.next()
+                social_entries.extend(ig_entries)
+                logger.info(f"Instagram: parsed {len(ig_entries)} art entries")
+        except Exception as e:
+            logger.error(f"Step 0a failed: {e}")
+
+        # Step 0b — TikTok: Scrape gallery/museum accounts and art hashtags
+        self._step_log("Step 0b: TikTok Gallery & Museum Scraping")
+        try:
+            tiktok_parser = ArtTikTokParser()
+            raw_videos = tiktok_parser.scrape()
+            filtered_videos = tiktok_parser.filter_art_videos(raw_videos)
+            stats["tiktok_videos_collected"] = len(filtered_videos)
+            logger.info(
+                f"TikTok: {len(raw_videos)} raw videos → {len(filtered_videos)} after keyword filter"
+            )
+            if filtered_videos:
+                tk_entries = tiktok_parser.parse(filtered_videos)
+                stats["tiktok_entries_parsed"] = len(tk_entries)
+                for entry in tk_entries:
+                    entry.entry_batch_id = entry_batch_id
+                    entry.event_entry_id = id_generator.next()
+                social_entries.extend(tk_entries)
+                logger.info(f"TikTok: parsed {len(tk_entries)} art entries")
+        except Exception as e:
+            logger.error(f"Step 0b failed: {e}")
 
         # Step 1 — Generate Search Plan
         self._step_log("Step 1: Generate Art Search Plan")
@@ -210,7 +329,6 @@ class ArtAgent:
 
         # Step 7 — Parse Web Batch into Art Entries
         self._step_log("Step 7: Parse Web Batch")
-        id_generator = IDGenerator(self._supabase)
         full_batch = web_batch + round2_batch
         entry_batch: list[ArtEntry] = []
         try:
@@ -219,10 +337,15 @@ class ArtAgent:
             for entry in raw_entries:
                 entry.entry_batch_id = entry_batch_id
                 entry.event_entry_id = id_generator.next()
-            entry_batch = raw_entries
-            logger.info(f"Parsed {len(entry_batch)} raw art entries")
+            # Merge social entries + web entries into one batch
+            entry_batch = social_entries + raw_entries
+            logger.info(
+                f"Parsed {len(raw_entries)} web entries + "
+                f"{len(social_entries)} social entries = {len(entry_batch)} total"
+            )
         except Exception as e:
             logger.error(f"Step 7 failed: {e}")
+            entry_batch = social_entries  # fall back to social-only if web parsing fails
 
         # Step 7b — Geocoding Enrichment
         self._step_log("Step 7b: Geocoding Enrichment")
@@ -274,15 +397,53 @@ class ArtAgent:
         duration = time.time() - run_start
         logger.info(
             f"=== Art Run COMPLETE | entry_batch_id={entry_batch_id} | duration={duration:.1f}s ===\n"
-            f"  Queries executed:          {stats['queries_executed']}\n"
-            f"  Pages fetched (Round 1):   {stats['pages_round1']}\n"
-            f"  Pages fetched (Round 2):   {stats['pages_round2']}\n"
-            f"  Raw entries parsed:        {stats['entries_parsed']}\n"
-            f"  Intra-batch dupes removed: {stats['dupes_intrabatch']}\n"
-            f"  Cross-DB dupes removed:    {stats['dupes_crossdb']}\n"
-            f"  New entries inserted:      {stats['entries_inserted']}\n"
-            f"  Entries archived:          {stats['entries_archived']}"
+            f"  Instagram profiles scraped:  {stats['instagram_profiles_scraped']}\n"
+            f"  Instagram entries parsed:    {stats['instagram_entries_parsed']}\n"
+            f"  TikTok videos collected:     {stats['tiktok_videos_collected']}\n"
+            f"  TikTok entries parsed:       {stats['tiktok_entries_parsed']}\n"
+            f"  Web queries executed:        {stats['queries_executed']}\n"
+            f"  Pages fetched (Round 1):     {stats['pages_round1']}\n"
+            f"  Pages fetched (Round 2):     {stats['pages_round2']}\n"
+            f"  Web entries parsed:          {stats['entries_parsed']}\n"
+            f"  Intra-batch dupes removed:   {stats['dupes_intrabatch']}\n"
+            f"  Cross-DB dupes removed:      {stats['dupes_crossdb']}\n"
+            f"  New entries inserted:        {stats['entries_inserted']}\n"
+            f"  Entries archived:            {stats['entries_archived']}"
         )
+
+    async def _scrape_instagram_profiles_concurrent(
+        self, handles: list[str]
+    ) -> list[tuple[str, dict]]:
+        semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+
+        async def scrape_one(handle: str) -> tuple[str, dict]:
+            async with semaphore:
+                loop = asyncio.get_event_loop()
+                try:
+                    data = await loop.run_in_executor(
+                        None, lambda: self._instagram_profile_tool._run(handle)
+                    )
+                    return (handle, data)
+                except Exception as e:
+                    logger.error(f"Instagram profile failed for @{handle}: {e}")
+                    return (handle, {})
+
+        return list(await asyncio.gather(*[scrape_one(h) for h in handles]))
+
+    @staticmethod
+    def _extract_post_caption(post: dict) -> str:
+        """Pull the caption text out of a post object regardless of schema shape."""
+        for key in ("caption", "description", "text", "edge_media_to_caption"):
+            val = post.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+            if isinstance(val, dict):
+                edges = val.get("edges") or []
+                if edges:
+                    node_text = (edges[0].get("node") or {}).get("text") or ""
+                    if node_text:
+                        return node_text.strip()
+        return ""
 
     async def _run_searches_concurrent(self, queries) -> list[dict]:
         semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
