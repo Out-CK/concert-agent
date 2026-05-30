@@ -3,8 +3,9 @@ TikTok Concert Agent — discovers upcoming NYC concerts via Nimble's TikTok age
 and inserts them into the Supabase event_entry_database.
 
 Pipeline:
+  0. Scrape curated NYC venue/promoter TikTok accounts directly.
   1. Search a curated list of concert-related hashtags concurrently.
-  2. Filter videos whose captions mention concert-related keywords.
+  2. Merge and deduplicate by post_id, then keyword-filter.
   3. For high-signal videos, fetch the full video page (description + comments).
   4. Parse all content with Claude → EventEntry objects.
   5. Assign IDs, deduplicate intra-batch and cross-DB.
@@ -19,6 +20,7 @@ from datetime import datetime
 
 from agent.duplicate_finder import DuplicateFinder
 from agent.tiktok_parser import TikTokParser
+from agent.tiktok_venue_scraper import TikTokVenueScraper
 from agent.web_batch_parser import EventEntry
 from db.operations import insert_event_entries, get_existing_venue_coords
 from db.supabase_client import get_supabase_client
@@ -67,6 +69,7 @@ class TikTokConcertAgent:
     def __init__(self):
         self._hashtag_tool = NimbleTikTokHashtagTool()
         self._video_tool = NimbleTikTokVideoTool()
+        self._venue_scraper = TikTokVenueScraper()
         self._supabase = get_supabase_client()
 
     # ------------------------------------------------------------------
@@ -79,6 +82,7 @@ class TikTokConcertAgent:
         logger.info(f"=== TikTok Concert Run START | entry_batch_id={entry_batch_id} ===")
 
         stats = {
+            "venue_posts_collected": 0,
             "hashtags_searched": 0,
             "videos_collected": 0,
             "videos_filtered": 0,
@@ -90,11 +94,27 @@ class TikTokConcertAgent:
         }
 
         # ------------------------------------------------------------------
+        # Step 0 — Scrape curated venue/promoter accounts
+        # ------------------------------------------------------------------
+        self._step_log("Step 0: Venue Account Scraping")
+        seen_post_ids: set[str] = set()
+        all_videos: list[dict] = []
+        try:
+            venue_posts = self._venue_scraper.scrape()
+            for post in venue_posts:
+                pid = post.get("post_id") or ""
+                if pid and pid not in seen_post_ids:
+                    seen_post_ids.add(pid)
+                    all_videos.append(post)
+            stats["venue_posts_collected"] = len(all_videos)
+            logger.info(f"Venue accounts yielded {len(all_videos)} unique posts")
+        except Exception as e:
+            logger.error(f"Step 0 failed: {e}")
+
+        # ------------------------------------------------------------------
         # Step 1 — Search TikTok hashtags
         # ------------------------------------------------------------------
         self._step_log("Step 1: TikTok Hashtag Searches")
-        all_videos: list[dict] = []
-        seen_post_ids: set[str] = set()
         try:
             raw_results = asyncio.run(self._search_hashtags_concurrent(HASHTAGS))
             stats["hashtags_searched"] = len(HASHTAGS)
@@ -106,7 +126,10 @@ class TikTokConcertAgent:
                     all_videos.append(video)
 
             stats["videos_collected"] = len(all_videos)
-            logger.info(f"Collected {len(all_videos)} unique TikTok videos across {len(HASHTAGS)} hashtags")
+            logger.info(
+                f"After hashtag search: {len(all_videos)} unique TikTok videos total "
+                f"({len(all_videos) - stats['venue_posts_collected']} from hashtags)"
+            )
         except Exception as e:
             logger.error(f"Step 1 failed: {e}")
 
@@ -207,8 +230,9 @@ class TikTokConcertAgent:
         logger.info(
             f"=== TikTok Concert Run COMPLETE | entry_batch_id={entry_batch_id} | "
             f"duration={duration:.1f}s ===\n"
+            f"  Venue account posts:     {stats['venue_posts_collected']}\n"
             f"  Hashtags searched:       {stats['hashtags_searched']}\n"
-            f"  Videos collected:        {stats['videos_collected']}\n"
+            f"  Total unique videos:     {stats['videos_collected']}\n"
             f"  Videos after filtering:  {stats['videos_filtered']}\n"
             f"  Full pages fetched:      {stats['video_pages_fetched']}\n"
             f"  Raw entries parsed:      {stats['entries_parsed']}\n"

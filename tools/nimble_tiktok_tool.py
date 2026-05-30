@@ -3,6 +3,7 @@ Nimble TikTok tools — wrappers around Nimble's pre-built TikTok agents.
 
   NimbleTikTokHashtagTool  — tiktok_hashtag_feed_community_2026_04_30
   NimbleTikTokVideoTool    — tiktok_video_page
+  NimbleTikTokAccountTool  — tiktok_account
 """
 from __future__ import annotations
 
@@ -118,3 +119,41 @@ class NimbleTikTokVideoTool(BaseTool):
 
     async def _arun(self, video_id: str, account_id: str) -> dict[str, Any]:
         return self._run(video_id, account_id)
+
+
+# ---------------------------------------------------------------------------
+# Account / Profile (returns top_posts_data with descriptions)
+# ---------------------------------------------------------------------------
+
+class NimbleTikTokAccountInput(BaseModel):
+    account_id: str = Field(description="TikTok handle without the @ (e.g. 'brooklynsteel')")
+
+
+class NimbleTikTokAccountTool(BaseTool):
+    name: str = "nimble_tiktok_account"
+    description: str = (
+        "Fetch a TikTok account's profile and recent posts via the Nimble TikTok Account agent. "
+        "Returns top_posts_data with descriptions, hashtags, post_url, and create_date."
+    )
+    args_schema: Type[BaseModel] = NimbleTikTokAccountInput
+
+    def _run(self, account_id: str) -> dict[str, Any]:
+        return self._fetch_with_retry(account_id)
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        before_sleep=lambda rs: logger.warning(
+            f"TikTok account retry {rs.attempt_number} for account={rs.args[1] if len(rs.args) > 1 else '?'}"
+        ),
+    )
+    def _fetch_with_retry(self, account_id: str) -> dict[str, Any]:
+        logger.info(f"Nimble TikTok account | @{account_id}")
+        data = _run_agent("tiktok_account", {"account_id": account_id})
+        posts = data.get("top_posts_data") or []
+        logger.info(f"TikTok account @{account_id} → {len(posts)} posts")
+        return data
+
+    async def _arun(self, account_id: str) -> dict[str, Any]:
+        return self._run(account_id)
