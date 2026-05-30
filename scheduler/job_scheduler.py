@@ -21,7 +21,27 @@ def run_concert_run() -> None:
         logger.error(f"Scheduled Concert Run failed: {e}", exc_info=True)
 
 
-def start_scheduler() -> None:
+def run_ticketing_run() -> None:
+    """Entry point for the daily Ticketing Run (Ticketmaster/SeatGeek/Eventbrite/StubHub)."""
+    from ticketing.ticketing_agent import TicketingAgent
+    logger.info("Scheduled Ticketing Run triggered")
+    try:
+        TicketingAgent().run()
+    except Exception as e:
+        logger.error(f"Scheduled Ticketing Run failed: {e}", exc_info=True)
+
+
+def run_instagram_run() -> None:
+    """Entry point for the daily Instagram Run."""
+    from agent.instagram_agent import InstagramAgent
+    logger.info("Scheduled Instagram Run triggered")
+    try:
+        InstagramAgent().run()
+    except Exception as e:
+        logger.error(f"Scheduled Instagram Run failed: {e}", exc_info=True)
+
+
+def start_scheduler(include_instagram: bool = False) -> None:
     """Start the APScheduler and block until Ctrl+C."""
     scheduler = BackgroundScheduler(timezone=eastern)
     scheduler.add_job(
@@ -31,8 +51,26 @@ def start_scheduler() -> None:
         name="Daily NYC Concert Run",
         replace_existing=True,
     )
+    scheduler.add_job(
+        run_ticketing_run,
+        trigger=CronTrigger(hour=9, minute=15, timezone=eastern),
+        id="daily_ticketing_run",
+        name="Daily Ticketing Platform Run",
+        replace_existing=True,
+    )
+    if include_instagram:
+        scheduler.add_job(
+            run_instagram_run,
+            trigger=CronTrigger(hour=9, minute=30, timezone=eastern),
+            id="daily_instagram_run",
+            name="Daily Instagram Concert Run",
+            replace_existing=True,
+        )
     scheduler.start()
     logger.info("Scheduler started — Concert Run fires daily at 09:00 America/New_York")
+    logger.info("Ticketing Run fires daily at 09:15 America/New_York")
+    if include_instagram:
+        logger.info("Instagram Run fires daily at 09:30 America/New_York")
     logger.info("Press Ctrl+C to stop")
     try:
         while True:

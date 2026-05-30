@@ -2,9 +2,10 @@
 CLI entrypoint for the Concert Agent.
 
 Usage:
-    python main.py --run-now      # Trigger a Concert Run immediately
-    python main.py --schedule     # Start the daily scheduler (blocks until Ctrl+C)
-    python main.py --tiktok       # Trigger a TikTok Concert Run immediately
+    python main.py --run-now        # Trigger a Concert Run immediately
+    python main.py --schedule       # Start the daily scheduler (blocks until Ctrl+C)
+    python main.py --tiktok         # Trigger a TikTok Concert Run immediately
+    python main.py --ticketing-run  # Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly
 """
 import argparse
 import os
@@ -48,6 +49,7 @@ def main() -> None:
     group.add_argument("--instagram", action="store_true", help="Trigger an Instagram Run immediately")
     group.add_argument("--instagram-schedule", action="store_true", help="Start the daily scheduler (concert + Instagram)")
     group.add_argument("--tiktok", action="store_true", help="Trigger a TikTok Concert Run immediately")
+    group.add_argument("--ticketing-run", action="store_true", help="Query Ticketmaster/SeatGeek/Eventbrite/StubHub directly")
     args = parser.parse_args()
 
     # Initialize Supabase client eagerly to catch config errors before running
@@ -78,6 +80,11 @@ def main() -> None:
         logger.info("Mode: --tiktok | Triggering immediate TikTok Concert Run")
         from agent.tiktok_agent import TikTokConcertAgent
         TikTokConcertAgent().run()
+
+    elif args.ticketing_run:
+        logger.info("Mode: --ticketing-run | Querying ticketing platforms directly")
+        from ticketing.ticketing_agent import TicketingAgent
+        TicketingAgent().run()
 
 
 if __name__ == "__main__":
