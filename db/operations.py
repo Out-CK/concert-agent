@@ -86,7 +86,7 @@ def _get_event_entry_columns() -> set[str]:
     if _EVENT_ENTRY_COLUMNS is None:
         client = get_supabase_client()
         try:
-            result = client.table("event_entry_database").select("*").limit(1).execute()
+            result = client.table("event_entry_database_v2").select("*").limit(1).execute()
             if result.data:
                 _EVENT_ENTRY_COLUMNS = set(result.data[0].keys())
             else:
