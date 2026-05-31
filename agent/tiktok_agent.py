@@ -146,6 +146,9 @@ class TikTokConcertAgent:
         # ------------------------------------------------------------------
         self._step_log("Step 3: Fetch Full Video Pages (high-signal)")
         high_signal = [v for v in filtered_videos if self._is_high_signal(v)]
+        if len(high_signal) > 20:
+            logger.info(f"Capping high-signal videos from {len(high_signal)} to 20")
+            high_signal = high_signal[:20]
         logger.info(f"Fetching full video pages for {len(high_signal)} high-signal videos")
         enriched = asyncio.run(self._enrich_video_pages_concurrent(high_signal))
 

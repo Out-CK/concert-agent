@@ -77,19 +77,59 @@ def get_existing_future_entries() -> list[dict[str, Any]]:
         return []
 
 
+_EVENT_ENTRY_COLUMNS: set[str] | None = None
+
+
+def _get_event_entry_columns() -> set[str]:
+    """Fetch and cache the actual columns present in event_entry_database."""
+    global _EVENT_ENTRY_COLUMNS
+    if _EVENT_ENTRY_COLUMNS is None:
+        client = get_supabase_client()
+        try:
+            result = client.table("event_entry_database").select("*").limit(1).execute()
+            if result.data:
+                _EVENT_ENTRY_COLUMNS = set(result.data[0].keys())
+            else:
+                # No rows yet — fall back to a safe minimal set; address may be absent
+                _EVENT_ENTRY_COLUMNS = set()
+        except Exception:
+            _EVENT_ENTRY_COLUMNS = set()
+    return _EVENT_ENTRY_COLUMNS
+
+
+def _strip_unknown_columns(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove any keys that don't exist as columns in the table (e.g. address if not yet added)."""
+    known = _get_event_entry_columns()
+    if not known:
+        return entries
+    # Always allow 'id' to be absent (auto-assigned), so exclude it from enforcement
+    known.discard("id")
+    stripped = []
+    for row in entries:
+        stripped.append({k: v for k, v in row.items() if k in known})
+    removed = set(entries[0].keys()) - known if entries else set()
+    if removed:
+        logger.warning(
+            f"Stripped columns not found in event_entry_database schema: {removed}. "
+            "Run the migration SQL to add them."
+        )
+    return stripped
+
+
 def insert_event_entries(entries: list[dict[str, Any]]) -> int:
     """Bulk-insert Event Entries into event_entry_database_v2. Returns insert count."""
     if not entries:
         return 0
     client = get_supabase_client()
+    clean_entries = _strip_unknown_columns(entries)
     try:
-        client.table("event_entry_database_v2").insert(entries).execute()
-        logger.info(f"Inserted {len(entries)} entries into event_entry_database_v2")
-        return len(entries)
+        client.table("event_entry_database_v2").insert(clean_entries).execute()
+        logger.info(f"Inserted {len(clean_entries)} entries into event_entry_database_v2")
+        return len(clean_entries)
     except Exception as e:
         logger.error(
             f"Failed to insert event entries: {e}\n"
-            f"Data: {json.dumps(entries, default=str)[:2000]}"
+            f"Data: {json.dumps(clean_entries, default=str)[:2000]}"
         )
         raise
 
@@ -165,6 +205,41 @@ def update_venue_coords(venue: str, lat: float, lng: float, address: str) -> Non
     except Exception as e:
         logger.error(f"Failed to update coords for venue '{venue}': {e}")
         raise
+
+
+# ---------------------------------------------------------------------------
+# Instagram Scrape Cache
+# ---------------------------------------------------------------------------
+
+def get_recent_instagram_scrapes(days: int = 5) -> set[str]:
+    """Return Instagram handles that were successfully scraped within the last N days."""
+    client = get_supabase_client()
+    try:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        result = (
+            client.table("instagram_scrape_cache")
+            .select("handle")
+            .gte("scraped_at", cutoff)
+            .execute()
+        )
+        return {r["handle"] for r in (result.data or [])}
+    except Exception as e:
+        logger.warning(f"Could not fetch instagram scrape cache (table may not exist): {e}")
+        return set()
+
+
+def upsert_instagram_scrape(handle: str) -> None:
+    """Record that an Instagram handle was scraped now."""
+    client = get_supabase_client()
+    try:
+        from datetime import datetime
+        client.table("instagram_scrape_cache").upsert(
+            {"handle": handle, "scraped_at": datetime.utcnow().isoformat()},
+            on_conflict="handle",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"Could not upsert instagram scrape cache for @{handle}: {e}")
 
 
 def insert_past_event_entry(entry: dict[str, Any]) -> None:
