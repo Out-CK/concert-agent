@@ -1,9 +1,6 @@
 name: Daily Ticketing Run
 
-on:
-  schedule:
-    - cron: "15 13 * * *" # 9:15 AM ET (UTC-4)
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   ticketing-run:
