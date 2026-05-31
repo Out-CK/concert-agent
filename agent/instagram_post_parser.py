@@ -25,11 +25,16 @@ Rules:
 - Create a SEPARATE entry for each distinct concert date.
 - Set event_type = "concert". Skip sports, comedy shows, theater, films, club DJ nights with no live performer.
 - event_title format: "[Artist] at [Venue]"
-- date format: "MM-DD-YYYY" (e.g. "06-15-2026")
-- start_time / end_time format: "00:00am" or "00:00pm" (e.g. "08:00pm")
-- If artist, venue, OR date cannot be confidently determined, SKIP that entry entirely.
-- For ticket links found in post captions or bios, populate tickets_source_1 with the URL.
-  Otherwise use no_tickets_source_1 with the Instagram profile URL as the source.
+- date format: "MM-DD-YYYY" (e.g., "06-15-2026")
+- start_time / end_time format: "00:00am" or "00:00pm" (e.g., "08:00pm")
+- Populate no_tickets_source_1 with the SPECIFIC POST URL if one is provided (e.g.
+  "https://www.instagram.com/p/ABC123/"). If no specific post URL is available, use
+  the Instagram profile URL instead.
+- Populate no_tickets_webpage_contents_1 with the relevant post caption text.
+- If a post contains a ticket link (axs.com, ticketmaster.com, stubhub.com, dice.fm, etc.),
+  use tickets_source_1 for the ticket URL and tickets_webpage_contents_1 for the text instead.
+  Still populate no_tickets_source_1 with the Instagram post/profile URL.
+- If artist, venue, OR date cannot be confidently extracted, SKIP that entry.
 - DO NOT set event_entry_id or entry_batch_id — leave them as empty strings "".
 - Return JSON with key "entries" containing an array of EventEntry objects.
 
