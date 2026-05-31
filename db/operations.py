@@ -39,7 +39,7 @@ def get_existing_venue_coords() -> dict[str, tuple[float, float, str]]:
     client = get_supabase_client()
     try:
         result = (
-            client.table("event_entry_database")
+            client.table("event_entry_database_v2")
             .select("venue, address, lat, lng")
             .not_.is_("lat", "null")
             .execute()
@@ -61,12 +61,12 @@ def get_existing_venue_addresses() -> dict[str, str]:
 
 
 def get_existing_future_entries() -> list[dict[str, Any]]:
-    """Fetch all entries in event_entry_database where date >= today."""
+    """Fetch all entries in event_entry_database_v2 where date >= today."""
     client = get_supabase_client()
     today_str = date.today().strftime("%m-%d-%Y")
     try:
         result = (
-            client.table("event_entry_database")
+            client.table("event_entry_database_v2")
             .select("event_entry_id, artist, venue, date, start_time")
             .gte("date", today_str)
             .execute()
@@ -78,13 +78,13 @@ def get_existing_future_entries() -> list[dict[str, Any]]:
 
 
 def insert_event_entries(entries: list[dict[str, Any]]) -> int:
-    """Bulk-insert Event Entries into event_entry_database. Returns insert count."""
+    """Bulk-insert Event Entries into event_entry_database_v2. Returns insert count."""
     if not entries:
         return 0
     client = get_supabase_client()
     try:
-        client.table("event_entry_database").insert(entries).execute()
-        logger.info(f"Inserted {len(entries)} entries into event_entry_database")
+        client.table("event_entry_database_v2").insert(entries).execute()
+        logger.info(f"Inserted {len(entries)} entries into event_entry_database_v2")
         return len(entries)
     except Exception as e:
         logger.error(
@@ -95,12 +95,12 @@ def insert_event_entries(entries: list[dict[str, Any]]) -> int:
 
 
 def get_past_entries() -> list[dict[str, Any]]:
-    """Fetch all entries in event_entry_database where date < today."""
+    """Fetch all entries in event_entry_database_v2 where date < today."""
     client = get_supabase_client()
     today_str = date.today().strftime("%m-%d-%Y")
     try:
         result = (
-            client.table("event_entry_database")
+            client.table("event_entry_database_v2")
             .select("*")
             .lt("date", today_str)
             .execute()
@@ -112,10 +112,10 @@ def get_past_entries() -> list[dict[str, Any]]:
 
 
 def delete_event_entry(event_entry_id: str) -> None:
-    """Delete a single entry from event_entry_database by event_entry_id."""
+    """Delete a single entry from event_entry_database_v2 by event_entry_id."""
     client = get_supabase_client()
     try:
-        client.table("event_entry_database").delete().eq(
+        client.table("event_entry_database_v2").delete().eq(
             "event_entry_id", event_entry_id
         ).execute()
     except Exception as e:
@@ -136,7 +136,7 @@ def get_unmapped_venues(event_type: str) -> dict[str, list[str]]:
     today_str = date.today().strftime("%m-%d-%Y")
     try:
         result = (
-            client.table("event_entry_database")
+            client.table("event_entry_database_v2")
             .select("event_entry_id, venue")
             .is_("lat", "null")
             .eq("event_type", event_type)
@@ -158,7 +158,7 @@ def update_venue_coords(venue: str, lat: float, lng: float, address: str) -> Non
     """Update lat, lng, and address for all events with the given venue name and no coords."""
     client = get_supabase_client()
     try:
-        client.table("event_entry_database").update(
+        client.table("event_entry_database_v2").update(
             {"lat": lat, "lng": lng, "address": address}
         ).eq("venue", venue).is_("lat", "null").execute()
         logger.info(f"Updated coords for venue '{venue}': ({lat}, {lng})")
