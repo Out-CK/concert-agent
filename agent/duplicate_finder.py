@@ -178,7 +178,12 @@ class DuplicateFinder:
             "date": base.date,
             "start_time": base.start_time,
             "end_time": base.end_time,
+            "genre": base.genre,
+            "media_url": base.media_url,
             "webpage_contents": base.webpage_contents,
+            "address": base.address,
+            "lat": base.lat,
+            "lng": base.lng,
         }
 
         merged_dict.update(self._merge_source_slots(group, "tickets"))
